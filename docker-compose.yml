@@ -1,0 +1,33 @@
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: sqlite:////app/data/app.db
+      VOSK_MODEL_PATH: /model
+      SECRET_KEY: ${SECRET_KEY:-change-me-docker-use-long-random-string}
+    volumes:
+      - app_data:/app/data
+      - app_storage:/app/storage
+      - type: bind
+        source: ${VOSK_MODEL_HOST_PATH:-./models/vosk-model-small-ru-0.22}
+        target: /model
+        read_only: true
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  app_data:
+  app_storage:

@@ -1,11 +1,16 @@
 import os
 from pathlib import Path
 
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 _BASE = Path(__file__).resolve().parent.parent
 _DATA = _BASE / "data"
+
+
+def _default_audio_dir() -> Path:
+    return _BASE / "storage" / "audio"
 
 
 class Settings(BaseSettings):
@@ -26,7 +31,18 @@ class Settings(BaseSettings):
     #: Абсолютный или относительно backend/ путь к модели; если задан — приоритет над vosk_model
     vosk_model_path: str = ""
 
-    audio_dir: Path = _BASE / "storage" / "audio"
+    #: Каталог для файлов записей; env: AUDIO_DIR (абсолютный или относительно каталога backend/)
+    audio_dir: Path = Field(default_factory=_default_audio_dir)
+
+    @field_validator("audio_dir", mode="before")
+    @classmethod
+    def _resolve_audio_dir(cls, v: object) -> Path:
+        if v is None or v == "":
+            return _default_audio_dir()
+        p = Path(v) if not isinstance(v, Path) else v
+        if not p.is_absolute():
+            return (_BASE / p).resolve()
+        return p.expanduser().resolve()
 
     def resolved_vosk_model_directory(self) -> Path:
         """Каталог модели: относительно папки backend/ (где лежит .env), если путь не абсолютный."""

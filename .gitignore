@@ -16,3 +16,7 @@ frontend/dist/
 ffmpeg-8.1/
 ffmpeg
 vosk-model-*/
+
+# Модель в models/ для Docker (только README в репозитории)
+models/*
+!models/README.md

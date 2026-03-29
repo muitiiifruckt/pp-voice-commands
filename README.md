@@ -4,14 +4,44 @@ MVP: запись с микрофона, распознавание речи (VO
 
 ## Требования
 
-- Python 3.11+
-- Node.js 20+ (для сборки фронтенда)
-- [FFmpeg](https://ffmpeg.org/) в `PATH` (конвертация WebM/прочих форматов в WAV 16 kHz mono)
-- Модель VOSK, например [vosk-model-small-ru-0.22](https://alphacephei.com/vosk/models): скачайте **полный** zip и распакуйте **в каталог `backend`** рядом с `app/`, чтобы было `backend/vosk-model-small-ru-0.22/am/...`. Нужны `am/final.mdl`, `conf/`, `ivector/` и граф **`graph/HCLG.fst`** или **`graph/Gr.fst` + `graph/HCLr.fst`**. В `.env` достаточно **`VOSK_MODEL=vosk-model-small-ru-0.22`** (имя папки) или относительного пути от `backend/`, например `models/vosk-model-small-ru-0.22`. Для произвольного места задайте **`VOSK_MODEL_PATH`** (абсолютный или относительно `backend/`). На Windows при ошибках Vosk из‑за кириллицы в пути к проекту укажите **`VOSK_MODEL_PATH`** на каталог **без кириллицы** (например `C:/Models/...`).
+Зависят от способа запуска (см. раздел **Запуск** ниже).
 
-## Быстрый старт (разработка)
+**Общее для любого варианта:** распакованная модель [Vosk](https://alphacephei.com/vosk/models) с полным набором файлов (`am/final.mdl`, `conf/`, `ivector/`, граф в `graph/` — **`HCLG.fst`** или **`Gr.fst` + `HCLr.fst`**).
 
-### 1. Бэкенд
+- **Docker:** установленные **Docker** и **Docker Compose v2**. Python/Node/FFmpeg на хосте не нужны — они внутри образов. Модель монтируется с диска (в образ она не входит из‑за размера).
+- **Локально:** **Python 3.11+**, **Node.js 20+**, **[FFmpeg](https://ffmpeg.org/)** в `PATH`. Модель удобно положить в каталог **`backend`** рядом с `app/` (например `backend/vosk-model-small-ru-0.22/`). В **`backend/.env`** укажите **`VOSK_MODEL`** (имя папки) или путь; для каталога **без кириллицы** используйте **`VOSK_MODEL_PATH`** (например `C:/Models/...` на Windows).
+
+## Запуск
+
+Два равноправных варианта: **всё в Docker** или **ручной запуск бэкенда и фронтенда** на своей машине.
+
+### Вариант 1: Docker Compose (рекомендуется для проверки «как в проде»)
+
+1. Установите [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows/macOS) или Docker Engine + Compose (Linux).
+2. Скачайте и **распакуйте** модель Vosk. По умолчанию compose ожидает путь  
+   **`./models/vosk-model-small-ru-0.22`** относительно **корня репозитория** (создайте каталог `models`, см. [models/README.md](models/README.md)).  
+   Другой путь задайте переменной **`VOSK_MODEL_HOST_PATH`** (можно в файле `.env` в корне репозитория — см. пример [docker-compose.example.env](docker-compose.example.env)).
+3. В **корне репозитория** выполните:
+
+   ```bash
+   docker compose up --build
+   ```
+
+   Фоновый режим: `docker compose up -d --build`. Остановка: `Ctrl+C` или `docker compose down` (данные БД и аудио в томах сохраняются; сброс томов: `docker compose down -v`).
+
+4. Откройте в браузере:
+   - **http://localhost** — веб-интерфейс (nginx отдаёт SPA и проксирует **`/api`** на контейнер API);
+   - **http://localhost:8000/docs** — Swagger (порт API проброшен отдельно).
+
+Если порт **80** занят, в `docker-compose.yml` у сервиса `web` замените проброс, например на `"8080:80"`, и заходите на **http://localhost:8080**.
+
+Расшифровка томов, переменных и типичных проблем: **[docs/DOCKER_RU.md](docs/DOCKER_RU.md)**.
+
+### Вариант 2: Локально без Docker (удобно для разработки)
+
+Нужны Python, Node.js и FFmpeg (см. **Требования**). Модель — в **`backend/`** (или путь в **`VOSK_MODEL_PATH`** в `backend/.env`).
+
+**1. Бэкенд** (отдельный терминал):
 
 ```powershell
 cd backend
@@ -19,11 +49,11 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 copy .env.example .env
-# Положите распакованную модель в backend/<имя> и при необходимости смените VOSK_MODEL
+# Отредактируйте .env: VOSK_MODEL или VOSK_MODEL_PATH под ваш каталог модели
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-### 2. Фронтенд
+**2. Фронтенд** (второй терминал):
 
 ```powershell
 cd frontend
@@ -31,11 +61,11 @@ npm install
 npm run dev
 ```
 
-Откройте в браузере адрес, который покажет Vite (обычно `http://127.0.0.1:5173`). Запросы к `/api` проксируются на порт 8000.
+Откройте URL, который покажет Vite (обычно **http://127.0.0.1:5173**). Запросы к **`/api`** проксируются на **http://127.0.0.1:8000** (см. `frontend/vite.config.ts`).
 
 ### Учётные записи по умолчанию
 
-После первого запуска создаются:
+После первого запуска бэкенда (в Docker или локально) в БД создаются:
 
 | Логин    | Пароль       | Роль     |
 |----------|--------------|----------|
@@ -43,6 +73,10 @@ npm run dev
 | operator | operator123  | operator |
 
 Смените пароли в реальной среде.
+
+## Демо
+
+В каталоге `demo/` — видео работы приложения (в репозитории оно хранится через **Git LFS**; при клонировании нужен `git lfs install`). **В демо использовалась модель Vosk [vosk-model-ru-0.42](https://alphacephei.com/vosk/models)** (полная русская модель: дольше стартует и занимает больше места, чем `small-ru`, обычно выше качество распознавания).
 
 ## Продакшен (сборка фронтенда)
 
@@ -71,4 +105,4 @@ npm run build
 2. Загрузите исходники (без `node_modules`, `.venv`, `backend/data`, `backend/storage`).
 3. В отчёте укажите ссылку и приложите архив при необходимости.
 
-Подробное описание для критериев задания (БД, UML, DFD, ИИ) — файл [docs/TECHNICAL_SOLUTION_RU.md](docs/TECHNICAL_SOLUTION_RU.md).
+**Документация:** индекс [docs/README.md](docs/README.md). Docker — [docs/DOCKER_RU.md](docs/DOCKER_RU.md). Полное описание системы и диаграммы — [docs/FULL_PROJECT_DOCUMENTATION_RU.md](docs/FULL_PROJECT_DOCUMENTATION_RU.md). Кратко по критериям задания (2.1–2.4) — [docs/TECHNICAL_SOLUTION_RU.md](docs/TECHNICAL_SOLUTION_RU.md). Промпты к ИИ — [docs/prompts/PROMPTS_RU.md](docs/prompts/PROMPTS_RU.md).
