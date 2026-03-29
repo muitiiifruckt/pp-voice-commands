@@ -4,7 +4,8 @@
 |------|------------|
 | [FULL_PROJECT_DOCUMENTATION_RU.md](FULL_PROJECT_DOCUMENTATION_RU.md) | **Полное описание** реализованного функционала, структура репозитория, **диаграммы** (архитектура, последовательности, DFD, ER, Use Case, состояния) |
 | [TECHNICAL_SOLUTION_RU.md](TECHNICAL_SOLUTION_RU.md) | Техническое решение по **критериям задания** (2.1–2.4): схема, технологии, БД, процессы |
-| [prompts/PROMPTS_RU.md](prompts/PROMPTS_RU.md) | Использование ИИ: **промпты** и **личный вклад** |
+| [prompts/PROMPTS_RU.md](prompts/PROMPTS_RU.md) | Использование ИИ: **промпты**, практики, таблицы |
+| [prompts/OTCHET_ISPOLZOVANIE_II_RU.md](prompts/OTCHET_ISPOLZOVANIE_II_RU.md) | **Личный отчёт** от первого лица о работе с ИИ (для раздела в пояснительной записке) |
 | [DOCKER_RU.md](DOCKER_RU.md) | **Docker Compose**: API + nginx, тома, модель Vosk, переменные окружения |
 | [WHY_SYNC_BACKEND_RU.md](WHY_SYNC_BACKEND_RU.md) | **Почему бэкенд синхронный**, а не async (Vosk, FFmpeg, SQLite, MVP) |
 
