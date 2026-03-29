@@ -17,6 +17,24 @@ import {
 
 type Tab = "record" | "history" | "admin";
 
+const MIC_DEVICE_STORAGE_KEY = "pp_audio_input_device";
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = window.setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (v) => {
+        window.clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        window.clearTimeout(t);
+        reject(e);
+      }
+    );
+  });
+}
+
 export default function App() {
   const [tab, setTab] = useState<Tab>("record");
   const [user, setUser] = useState<User | null>(null);
@@ -33,7 +51,13 @@ export default function App() {
     }
     try {
       setLoading(true);
-      setUser(await fetchMe());
+      setUser(
+        await withTimeout(
+          fetchMe(),
+          12_000,
+          "Сервер не отвечает. Запустите бэкенд: из папки backend выполните uvicorn app.main:app --reload --port 8000"
+        )
+      );
       setErr(null);
     } catch (e) {
       setUser(null);
@@ -143,10 +167,22 @@ function RecordPanel({ onSaved }: { onSaved: () => void }) {
   const [rec, setRec] = useState<MediaRecorder | null>(null);
   const chunks = useRef<BlobPart[]>([]);
   const mimeRef = useRef("");
+  const peakLevelRef = useRef(0);
+  const meterRafRef = useRef(0);
+  const audioCtxRef = useRef<AudioContext | null>(null);
   const [status, setStatus] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [last, setLast] = useState<VoiceRecord | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([]);
+  const [deviceId, setDeviceId] = useState(() => {
+    try {
+      return localStorage.getItem(MIC_DEVICE_STORAGE_KEY) || "";
+    } catch {
+      return "";
+    }
+  });
+  const [inputLevel, setInputLevel] = useState(0);
 
   const mime = useMemo(() => {
     if (typeof MediaRecorder === "undefined") return "";
@@ -155,19 +191,93 @@ function RecordPanel({ onSaved }: { onSaved: () => void }) {
     return "";
   }, []);
 
+  const refreshAudioInputs = useCallback(async () => {
+    try {
+      const list = await navigator.mediaDevices.enumerateDevices();
+      setAudioInputs(list.filter((d) => d.kind === "audioinput"));
+    } catch {
+      setAudioInputs([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshAudioInputs();
+    navigator.mediaDevices.addEventListener("devicechange", refreshAudioInputs);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", refreshAudioInputs);
+  }, [refreshAudioInputs]);
+
+  function stopMeter() {
+    cancelAnimationFrame(meterRafRef.current);
+    meterRafRef.current = 0;
+    setInputLevel(0);
+    const ctx = audioCtxRef.current;
+    audioCtxRef.current = null;
+    if (ctx && ctx.state !== "closed") {
+      void ctx.close();
+    }
+  }
+
+  async function openMicrophone(): Promise<MediaStream> {
+    const processing: MediaTrackConstraints = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    };
+    if (deviceId) {
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          audio: { ...processing, deviceId: { exact: deviceId } },
+        });
+      } catch {
+        setErr("Выбранный микрофон недоступен. Выберите другой или «По умолчанию».");
+      }
+    }
+    return navigator.mediaDevices.getUserMedia({ audio: processing });
+  }
+
   async function start() {
     setErr(null);
     chunks.current = [];
     mimeRef.current = mime;
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    peakLevelRef.current = 0;
+    stopMeter();
+
+    const stream = await openMicrophone();
+    await refreshAudioInputs();
+
+    const audioCtx = new AudioContext();
+    audioCtxRef.current = audioCtx;
+    if (audioCtx.state === "suspended") {
+      await audioCtx.resume();
+    }
+    const source = audioCtx.createMediaStreamSource(stream);
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+    const td = new Uint8Array(analyser.fftSize);
+    function meterTick() {
+      analyser.getByteTimeDomainData(td);
+      let sum = 0;
+      for (let i = 0; i < td.length; i++) {
+        const v = (td[i] - 128) / 128;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / td.length);
+      peakLevelRef.current = Math.max(peakLevelRef.current, rms);
+      setInputLevel(rms);
+      meterRafRef.current = requestAnimationFrame(meterTick);
+    }
+    meterRafRef.current = requestAnimationFrame(meterTick);
+
     const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
     mr.ondataavailable = (e) => {
       if (e.data.size) chunks.current.push(e.data);
     };
     mr.onstop = () => {
+      stopMeter();
       stream.getTracks().forEach((t) => t.stop());
       void (async () => {
-        const blob = new Blob(chunks.current, { type: mimeRef.current || "audio/webm" });
+        const blob = new Blob(chunks.current, { type: mimeRef.current || mr.mimeType || "audio/webm" });
         chunks.current = [];
         if (!blob.size) {
           setStatus("");
@@ -182,6 +292,15 @@ function RecordPanel({ onSaved }: { onSaved: () => void }) {
           setLast(row);
           onSaved();
           setStatus("Готово");
+          if (peakLevelRef.current < 0.012) {
+            setErr(
+              "Уровень сигнала при записи почти нулевой — в файл, скорее всего, попала тишина. В списке выше выберите тот микрофон, который работает в других программах, и проверьте зелёную полосу уровня во время записи.",
+            );
+          } else if (!(row.raw_transcript || "").trim()) {
+            setErr(
+              "Распознавание не дало текста: говорите громче и дольше (5–10 с) или введите текст вручную в «Истории».",
+            );
+          }
         } catch (e) {
           setErr(e instanceof Error ? e.message : "Ошибка");
           setStatus("");
@@ -209,8 +328,42 @@ function RecordPanel({ onSaved }: { onSaved: () => void }) {
         <h2>Запись команды</h2>
         <p style={{ color: "var(--muted)", marginTop: 0 }}>
           Произнесите команду чётко по-русски, лучше <strong>5–10 секунд</strong>. Пример: «Зарегистрировать трубу номер
-          …» или «Отменить обработку плавки 21957898». Если текст часто пустой — попробуйте модель побольше (см. README).
+          …» или «Отменить обработку плавки 21957898». Браузер может брать <strong>другой микрофон</strong>, чем Audacity
+          или Zoom — выберите устройство ниже.
         </p>
+        <div className="field" style={{ marginBottom: "0.75rem" }}>
+          <label>Микрофон для этого сайта</label>
+          <div className="row" style={{ alignItems: "stretch" }}>
+            <select
+              style={{ flex: 1, minWidth: 0 }}
+              value={deviceId}
+              disabled={!!rec || busy}
+              onChange={(e) => {
+                const v = e.target.value;
+                setDeviceId(v);
+                try {
+                  if (v) localStorage.setItem(MIC_DEVICE_STORAGE_KEY, v);
+                  else localStorage.removeItem(MIC_DEVICE_STORAGE_KEY);
+                } catch {
+                  /* ignore */
+                }
+              }}
+            >
+              <option value="">По умолчанию (как выбрал браузер)</option>
+              {audioInputs.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label || `Вход ${d.deviceId.slice(0, 8)}…`}
+                </option>
+              ))}
+            </select>
+            <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void refreshAudioInputs()}>
+              Обновить список
+            </button>
+          </div>
+          <p style={{ fontSize: "0.8rem", color: "var(--muted)", margin: "0.35rem 0 0" }}>
+            Если названий нет — один раз начните запись (разрешите доступ), затем нажмите «Обновить список».
+          </p>
+        </div>
         <div className="row">
           {!rec ? (
             <button type="button" className="btn" disabled={busy} onClick={() => void start()}>
@@ -223,6 +376,16 @@ function RecordPanel({ onSaved }: { onSaved: () => void }) {
           )}
           {busy && <span className="badge">Отправка на сервер…</span>}
         </div>
+        {rec && (
+          <div className="mic-meter" style={{ marginTop: "0.75rem" }}>
+            <div className="mic-meter-track">
+              <div className="mic-meter-fill" style={{ width: `${Math.min(100, inputLevel * 500)}%` }} />
+            </div>
+            <p style={{ fontSize: "0.8rem", color: "var(--muted)", margin: "0.35rem 0 0" }}>
+              Уровень входа: {inputLevel < 0.01 ? "тишина — смените микрофон или проверьте громкость" : "сигнал есть"}
+            </p>
+          </div>
+        )}
         {status && <p style={{ marginTop: "0.75rem" }}>{status}</p>}
         {err && <p className="error">{err}</p>}
       </div>
@@ -440,7 +603,16 @@ function DetailModal({
         )}
         <div className="field">
           <label>Текст (после правки — подтвердить)</label>
-          <textarea rows={4} value={text} onChange={(e) => setText(e.target.value)} />
+          <textarea
+            rows={4}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder={
+              !(row.raw_transcript || "").trim()
+                ? "Распознавание пустое — введите команду вручную или запишите снова громче."
+                : undefined
+            }
+          />
         </div>
         <div className="row">
           <div className="field" style={{ flex: 1, marginBottom: 0 }}>
@@ -453,9 +625,15 @@ function DetailModal({
           </div>
         </div>
         <p style={{ fontSize: "0.85rem", color: "var(--muted)" }}>
-          Исходное распознавание: <span className="mono">{row.raw_transcript}</span>
+          Исходное распознавание:{" "}
+          <span className="mono">{(row.raw_transcript || "").trim() ? row.raw_transcript : "— (пусто)"}</span>
         </p>
         {err && <p className="error">{err}</p>}
+        {!(row.raw_transcript || "").trim() && (
+          <p style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: "0.25rem", marginBottom: 0 }}>
+            Подтверждение доступно после ввода текста вручную (распознавание не сработало).
+          </p>
+        )}
         <div className="row" style={{ marginTop: "0.75rem" }}>
           <button type="button" className="btn" disabled={busy || !text.trim()} onClick={() => void confirm()}>
             Подтвердить результат

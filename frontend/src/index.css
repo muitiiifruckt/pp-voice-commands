@@ -186,3 +186,18 @@ h2 {
   font-size: 1.05rem;
   margin: 0 0 0.75rem;
 }
+
+.mic-meter-track {
+  height: 10px;
+  background: var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.mic-meter-fill {
+  height: 100%;
+  border-radius: 6px;
+  background: var(--ok);
+  min-width: 0;
+  transition: width 0.06s linear;
+}

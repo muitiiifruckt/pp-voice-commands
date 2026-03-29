@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import subprocess
 import tempfile
@@ -8,6 +9,7 @@ from pathlib import Path
 from app.config import settings
 
 _model = None
+_log = logging.getLogger(__name__)
 
 
 def _resolve_model_dir(root: Path) -> Path:
@@ -145,22 +147,53 @@ def transcribe_file(audio_path: Path) -> str:
             raise RuntimeError("Не удалось конвертировать аудио (ffmpeg).") from e
 
         wf = wave.open(str(work_wav), "rb")
-        rec = vosk.KaldiRecognizer(model, wf.getframerate())
+        rate = wf.getframerate()
+        nchan = wf.getnchannels()
+        sw = wf.getsampwidth()
+        nframes = wf.getnframes()
+        duration_s = nframes / rate if rate else 0.0
+        raw_pcm = wf.readframes(nframes)
+        wf.close()
+
+        peak = 0
+        if sw == 2 and nchan >= 1 and len(raw_pcm) >= 2:
+            # mono/stereo int16 LE — оценка максимальной амплитуды по первому каналу
+            step = nchan * 2
+            for i in range(0, len(raw_pcm) - 1, step):
+                sample = int.from_bytes(raw_pcm[i : i + 2], "little", signed=True)
+                a = abs(sample)
+                if a > peak:
+                    peak = a
+
+        if peak < 200:
+            _log.warning(
+                "ASR: очень тихий или пустой сигнал после конвертации (peak=%s, %.2fs, %d ch). "
+                "Проверьте микрофон в системе и громкость записи.",
+                peak,
+                duration_s,
+                nchan,
+            )
+        else:
+            _log.info("ASR: входной WAV %d Hz, %.2fs, peak=%d", rate, duration_s, peak)
+
+        rec = vosk.KaldiRecognizer(model, rate)
         rec.SetWords(False)
         full: list[str] = []
-        while True:
-            data = wf.readframes(4000)
-            if len(data) == 0:
-                break
-            if rec.AcceptWaveform(data):
+        pos = 0
+        frame_bytes = 4000 * nchan * sw
+        while pos < len(raw_pcm):
+            chunk = raw_pcm[pos : pos + frame_bytes]
+            pos += len(chunk)
+            if rec.AcceptWaveform(chunk):
                 res = json.loads(rec.Result())
                 if res.get("text"):
                     full.append(res["text"])
         res = json.loads(rec.FinalResult())
         if res.get("text"):
             full.append(res["text"])
-        wf.close()
-        return " ".join(full).strip()
+        out = " ".join(full).strip()
+        _log.info("ASR: результат распознавания (%d симв.): %s", len(out), out if out else "<пусто>")
+        return out
     finally:
         if delete_work and work_wav and work_wav.exists():
             work_wav.unlink(missing_ok=True)
