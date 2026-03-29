@@ -105,4 +105,4 @@ npm run build
 2. Загрузите исходники (без `node_modules`, `.venv`, `backend/data`, `backend/storage`).
 3. В отчёте укажите ссылку и приложите архив при необходимости.
 
-**Документация:** индекс [docs/README.md](docs/README.md). Docker — [docs/DOCKER_RU.md](docs/DOCKER_RU.md). Полное описание системы и диаграммы — [docs/FULL_PROJECT_DOCUMENTATION_RU.md](docs/FULL_PROJECT_DOCUMENTATION_RU.md). Кратко по критериям задания (2.1–2.4) — [docs/TECHNICAL_SOLUTION_RU.md](docs/TECHNICAL_SOLUTION_RU.md). Промпты к ИИ — [docs/prompts/PROMPTS_RU.md](docs/prompts/PROMPTS_RU.md).
+**Документация:** индекс [docs/README.md](docs/README.md). Docker — [docs/DOCKER_RU.md](docs/DOCKER_RU.md). Полное описание системы и диаграммы — [docs/FULL_PROJECT_DOCUMENTATION_RU.md](docs/FULL_PROJECT_DOCUMENTATION_RU.md). Кратко по критериям задания (2.1–2.4) — [docs/TECHNICAL_SOLUTION_RU.md](docs/TECHNICAL_SOLUTION_RU.md). Почему API синхронный, не async — [docs/WHY_SYNC_BACKEND_RU.md](docs/WHY_SYNC_BACKEND_RU.md). Промпты к ИИ — [docs/prompts/PROMPTS_RU.md](docs/prompts/PROMPTS_RU.md).

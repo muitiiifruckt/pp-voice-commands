@@ -71,6 +71,8 @@ flowchart LR
 | React | 18.x | UI |
 | Vite | 6.x | Сборка и dev-сервер с proxy на API |
 
+Эндпоинты реализованы как **синхронные** (`def`), без `async`/`await` по осознанному выбору: доминирующие операции (Vosk, FFmpeg) блокирующие, SQLite с синхронным ORM достаточен для MVP. Подробнее: [WHY_SYNC_BACKEND_RU.md](WHY_SYNC_BACKEND_RU.md).
+
 ---
 
 ## 2.3. База данных (до 10 баллов)
